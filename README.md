@@ -1,4 +1,4 @@
-# Engineering Toolbox (web app)
+# AccioBox
 `npm install && npm run dev` · `npm test` · `npm run build`
 Contenuti in `content/` (vedi content/README.md). Motore in `src/engine.ts` (math.js isolato in un solo file).
 Stato: iterazione 1, non ancora compilata/testata (vedi CHANGELOG).

@@ -7,7 +7,7 @@ import yaml from 'js-yaml'
 import {solve, fmt, evaluate, roots, analyzeUnits, convert, Angle, Study} from './engine'
 import './style.css'
 import {registerSW} from 'virtual:pwa-register'
-import {Keypad, Calcolatrice, Convertitore} from './keypad'
+import {Calcolatrice, Convertitore, useCaret} from './keypad'
 
 type Formula = {id: string; nome: string; latex: string; expr: string; stato: string; fonte: string; ipotesi?: string; variabili: Record<string, string>; materia: string}
 const files = import.meta.glob('/content/formulario/**/formule.yaml', {query: '?raw', import: 'default', eager: true}) as Record<string, string>
@@ -18,38 +18,78 @@ const FORMULE: Formula[] = Object.entries(files).flatMap(([p, raw]) => {
 const Tex = ({t}: {t: string}) => <span dangerouslySetInnerHTML={{__html: katex.renderToString(t, {throwOnError: false})}} />
 const store = {get: (k: string, d: any) => { try { return JSON.parse(localStorage.getItem(k) ?? '') } catch { return d } }, set: (k: string, v: any) => localStorage.setItem(k, JSON.stringify(v))}
 
+type View = {x0: number; x1: number; y0: number; y1: number}
+const nice = (span: number, n = 6) => { const raw = span / n, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p }
+const tfmt = (t: number) => String(Number(t.toPrecision(6)))
+function fitView(st: Study): View {
+  const xs = [...st.zeros, ...st.crit.map(c => c.x), ...st.infl]
+  const x0 = Math.max(-100, Math.min(-5, ...xs.map(x => x - 1))), x1 = Math.min(100, Math.max(5, ...xs.map(x => x + 1)))
+  const ys: number[] = []; for (let i = 0; i <= 400; i++) { const y = st.fn(x0 + (x1 - x0) * i / 400); if (isFinite(y)) ys.push(y) }
+  ys.sort((a, b) => a - b); let y0 = ys.length ? ys[Math.floor(ys.length * 0.02)] : -5, y1 = ys.length ? ys[Math.floor(ys.length * 0.98)] : 5
+  const pad = (y1 - y0) * 0.15 || 1; return {x0, x1, y0: y0 - pad, y1: y1 + pad}
+}
+const zoomAt = (vw: View, ax: number, ay: number, k: number): View => {
+  const sx = (vw.x1 - vw.x0) * k, sy = (vw.y1 - vw.y0) * k; if (sx < 1e-6 || sx > 1e7 || sy < 1e-6 || sy > 1e7) return vw
+  const fx = (ax - vw.x0) / (vw.x1 - vw.x0), fy = (ay - vw.y0) / (vw.y1 - vw.y0)
+  return {x0: ax - fx * sx, x1: ax - fx * sx + sx, y0: ay - fy * sy, y1: ay - fy * sy + sy}
+}
 function Plot({st}: {st: Study}) {
   const ref = useRef<HTMLCanvasElement>(null)
-  const [v, setV] = useState({x0: -6, x1: 6, y0: -6, y1: 6})
+  const [v, setV] = useState<View>(() => fitView(st)), vr = useRef(v); vr.current = v
+  const [cur, setCur] = useState<{x: number; y: number} | null>(null)
+  const ptrs = useRef(new Map<number, {x: number; y: number}>()), lastD = useRef(0)
+  useEffect(() => { setV(fitView(st)) }, [st])
+  const toData = (cx: number, cy: number, vw: View) => { const r = ref.current!.getBoundingClientRect(); return {x: vw.x0 + (cx - r.left) / r.width * (vw.x1 - vw.x0), y: vw.y1 - (cy - r.top) / r.height * (vw.y1 - vw.y0)} }
+  useEffect(() => { const c = ref.current!; const h = (e: WheelEvent) => { e.preventDefault(); const p = toData(e.clientX, e.clientY, vr.current); setV(zoomAt(vr.current, p.x, p.y, Math.exp(e.deltaY * 0.0015))) }
+    c.addEventListener('wheel', h, {passive: false}); return () => c.removeEventListener('wheel', h) }, [])
   useEffect(() => {
-    const c = ref.current!, g = c.getContext('2d')!, W = c.width, H = c.height
-    const X = (x: number) => (x - v.x0) / (v.x1 - v.x0) * W, Y = (y: number) => H - (y - v.y0) / (v.y1 - v.y0) * H
-    g.clearRect(0, 0, W, H); g.strokeStyle = '#888'; g.beginPath(); g.moveTo(X(0), 0); g.lineTo(X(0), H); g.moveTo(0, Y(0)); g.lineTo(W, Y(0)); g.stroke()
-    g.strokeStyle = '#e8a33d'; g.lineWidth = 2; g.beginPath(); let pen = false
-    for (let i = 0; i <= W; i++) { const x = v.x0 + (v.x1 - v.x0) * i / W, y = st.fn(x)
-      if (!isFinite(y) || Math.abs(y) > 1e6) { pen = false; continue }
-      pen ? g.lineTo(i, Y(y)) : g.moveTo(i, Y(y)); pen = true }
+    const c = ref.current!, g = c.getContext('2d')!, W = c.width, H = c.height, cs = getComputedStyle(c), col = (n: string) => cs.getPropertyValue(n).trim()
+    const X = (x: number) => (x - v.x0) / (v.x1 - v.x0) * W, Y = (y: number) => H - (y - v.y0) / (v.y1 - v.y0) * H, cl = (a: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, a))
+    g.fillStyle = col('--card'); g.fillRect(0, 0, W, H); g.font = '13px system-ui, sans-serif'
+    const sx = nice(v.x1 - v.x0), sy = nice(v.y1 - v.y0), axY = cl(Y(0), 16, H - 6), axX = cl(X(0), 6, W - 44)
+    g.lineWidth = 1
+    for (let k = Math.ceil(v.x0 / sx); k <= Math.floor(v.x1 / sx) && k - Math.ceil(v.x0 / sx) < 60; k++) { const px = X(k * sx); g.strokeStyle = col('--line'); g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke(); if (k !== 0) { g.fillStyle = col('--mut'); g.fillText(tfmt(k * sx), px + 3, axY - 5 > 14 ? Math.min(axY + 15, H - 4) : 14) } }
+    for (let k = Math.ceil(v.y0 / sy); k <= Math.floor(v.y1 / sy) && k - Math.ceil(v.y0 / sy) < 60; k++) { const py = Y(k * sy); g.strokeStyle = col('--line'); g.beginPath(); g.moveTo(0, py); g.lineTo(W, py); g.stroke(); if (k !== 0) { g.fillStyle = col('--mut'); g.fillText(tfmt(k * sy), axX + 5, py - 3) } }
+    g.strokeStyle = col('--mut'); g.lineWidth = 1.5; g.beginPath(); g.moveTo(0, axY); g.lineTo(W, axY); g.moveTo(axX, 0); g.lineTo(axX, H); g.stroke()
+    g.fillStyle = col('--fg'); g.fillText(st.v, W - 16, axY - 6 < 12 ? axY + 16 : axY - 6); g.fillText(st.name + '(' + st.v + ')', axX + 8 > W - 90 ? axX - 90 : axX + 8, 14)
+    g.strokeStyle = col('--acc'); g.lineWidth = 2.5; g.lineJoin = 'round'; g.beginPath(); let prev: number | null = null
+    for (let i = 0; i <= W; i++) { const y = st.fn(v.x0 + (v.x1 - v.x0) * i / W)
+      if (!isFinite(y) || Math.abs(Y(y)) > 1e5) { prev = null; continue }
+      const py = Y(y); if (prev === null || Math.abs(py - prev) > H * 3) g.moveTo(i, py); else g.lineTo(i, py); prev = py }
     g.stroke()
+    const dot = (x: number, y: number, c: string) => { if (!isFinite(y)) return; g.fillStyle = c; g.beginPath(); g.arc(X(x), Y(y), 5, 0, 7); g.fill(); g.strokeStyle = col('--card'); g.lineWidth = 2; g.stroke() }
+    st.zeros.slice(0, 40).forEach(x => dot(x, 0, col('--blue'))); st.crit.forEach(p => dot(p.x, p.y, col('--acc')))
   }, [st, v])
-  const drag = useRef<{x: number; y: number} | null>(null)
-  return <canvas ref={ref} width={640} height={360} className="plot"
-    onWheel={e => { const k = e.deltaY > 0 ? 1.15 : 1 / 1.15, cx = (v.x0 + v.x1) / 2, cy = (v.y0 + v.y1) / 2, hx = (v.x1 - v.x0) / 2 * k, hy = (v.y1 - v.y0) / 2 * k; setV({x0: cx - hx, x1: cx + hx, y0: cy - hy, y1: cy + hy}) }}
-    onPointerDown={e => { drag.current = {x: e.clientX, y: e.clientY}; (e.target as Element).setPointerCapture(e.pointerId) }}
-    onPointerUp={() => drag.current = null}
-    onPointerMove={e => { if (!drag.current) return; const r = ref.current!.getBoundingClientRect(), dx = (e.clientX - drag.current.x) / r.width * (v.x1 - v.x0), dy = (e.clientY - drag.current.y) / r.height * (v.y1 - v.y0)
-      drag.current = {x: e.clientX, y: e.clientY}; setV({x0: v.x0 - dx, x1: v.x1 - dx, y0: v.y0 + dy, y1: v.y1 + dy}) }} />
+  const rect = () => ref.current!.getBoundingClientRect()
+  const center = (k: number) => setV(zoomAt(v, (v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2, k))
+  return <div><canvas ref={ref} width={800} height={480} className="plot"
+    onPointerDown={e => { ptrs.current.set(e.pointerId, {x: e.clientX, y: e.clientY}); (e.target as Element).setPointerCapture(e.pointerId); if (ptrs.current.size === 2) { const [a, b] = [...ptrs.current.values()]; lastD.current = Math.hypot(a.x - b.x, a.y - b.y) } }}
+    onPointerMove={e => { const p = toData(e.clientX, e.clientY, vr.current); setCur({x: p.x, y: st.fn(p.x)})
+      const prev = ptrs.current.get(e.pointerId); if (!prev) return; ptrs.current.set(e.pointerId, {x: e.clientX, y: e.clientY}); const r = rect()
+      if (ptrs.current.size === 1) { const dx = (e.clientX - prev.x) / r.width * (vr.current.x1 - vr.current.x0), dy = (e.clientY - prev.y) / r.height * (vr.current.y1 - vr.current.y0); const w = vr.current; setV({x0: w.x0 - dx, x1: w.x1 - dx, y0: w.y0 + dy, y1: w.y1 + dy}) }
+      else if (ptrs.current.size === 2) { const [a, b] = [...ptrs.current.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (lastD.current > 0 && d > 0) { const m = toData((a.x + b.x) / 2, (a.y + b.y) / 2, vr.current); setV(zoomAt(vr.current, m.x, m.y, lastD.current / d)) } lastD.current = d } }}
+    onPointerUp={e => { ptrs.current.delete(e.pointerId); lastD.current = 0 }} onPointerCancel={e => { ptrs.current.delete(e.pointerId); lastD.current = 0 }} onPointerLeave={() => setCur(null)} />
+    <div className="row"><button onClick={() => center(0.7)}>＋</button><button onClick={() => center(1 / 0.7)}>－</button><button onClick={() => setV(fitView(st))}>⤢ Adatta vista</button>
+      <span className="mono muted" style={{marginLeft: 'auto'}}>{cur ? `${st.v}=${tfmt(cur.x)}  ${st.name}=${isFinite(cur.y) ? tfmt(cur.y) : '—'}` : 'trascina · pizzica/rotella per zoom'}</span></div>
+    <p className="muted"><span className="dot blue" /> zeri · <span className="dot amber" /> estremi</p></div>
 }
 
+const EX = ['a*x+b=0', 'x^2+b*x+c=0', 'f(x)=x^3-3*x', 'y=sin(x)', 'a=2; f(x)=a*x^2', 'sin(pi/4)^2+3!', '5 km/h to m/s']
+const SYM = ['^', '(', ')', 'pi', 'sqrt(', '=', ';', 'f(x)=']
 function Risolutore({angle}: {angle: Angle}) {
-  const [q, setQ] = useState('f(x) = x^3 - 3x'); const [out, setOut] = useState<any>(null); const [err, setErr] = useState('')
-  const run = (s = q) => { try { const r = solve(s, angle); setOut(r); setErr(''); store.set('hist', [s, ...store.get('hist', []).filter((h: string) => h !== s)].slice(0, 30)) } catch (e: any) { setErr(e.message); setOut(null) } }
+  const [q, setQ] = useState('a*x+b=0'); const [out, setOut] = useState<any>(null); const [err, setErr] = useState(''); const c = useCaret(q, setQ)
+  const run = (s = q, v?: string) => { try { const r = solve(s, angle, v); setOut(r); setErr(''); store.set('hist', [s, ...(store.get('hist', []) as string[]).filter(h => h !== s)].slice(0, 30)) } catch (e: any) { setErr(e.message); setOut(null) } }
   return <section><h2>Risolutore</h2>
-    <p className="muted">Esempi: <code>sin(pi/4)^2+3!</code> · <code>x^2-5x+6=0</code> · <code>f(x)=x^3-3x</code> · <code>5 km/h to m/s</code></p>
-    <input inputMode="none" value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && run()} />
-    <Keypad onKey={t => setQ(q + t)} onDel={() => setQ(q.slice(0, -1))} onClear={() => setQ('')} onEq={() => run()} extra={[{l: 'x'}, {l: '=', t: ' = '}, {l: 'f(x)=', t: 'f(x) = '}, {l: 'abs', t: 'abs('}, {l: 'to', t: ' to '}]} />
+    <div className="row"><input {...c.bind} className="big" value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && run()} placeholder="Espressione, equazione o f(x)=..." autoCapitalize="off" autoCorrect="off" spellCheck={false} /><button className="primary" onClick={() => run()}>Risolvi</button></div>
+    <div className="chips">{SYM.map(x => <button key={x} className="chip" onPointerDown={e => e.preventDefault()} onClick={() => c.insert(x)}>{x}</button>)}</div>
+    <p className="muted">Lettere libere ammesse. Valori con <code>a=2;</code> davanti. Esempi:</p>
+    <div className="chips">{EX.map(x => <button key={x} className="chip ex" onClick={() => { setQ(x); run(x) }}>{x}</button>)}</div>
     {err && <p className="err">{err}</p>}
-    {out && <div className="card"><b>{out.kind}</b> <span className="badge">{out.method}</span>{out.lines.map((l: string, i: number) => <div key={i} className="mono">{l}</div>)}{out.study && <Plot st={out.study} />}</div>}
-    <h3>Cronologia</h3>{store.get('hist', []).map((h: string) => <div key={h}><a onClick={() => { setQ(h); run(h) }}>{h}</a></div>)}
+    {out && <div className="card"><b>{out.kind}</b> <span className="badge">{out.method}</span>
+      {out.vars && out.vars.length > 1 && out.forVar && <div className="chips"><span className="muted">Risolvi per:</span>{out.vars.map((x: string) => <button key={x} className={'chip ' + (x === out.forVar ? 'on' : '')} onClick={() => run(q, x)}>{x}</button>)}</div>}
+      {out.lines.map((l: any, i: number) => <div key={i} className="line">{l.tex ? <Tex t={l.tex} /> : <span className="mono">{l.t}</span>}{l.approx && <span className="mono muted"> ≈ {l.approx}</span>}</div>)}
+      {out.study && <Plot st={out.study} />}</div>}
+    <h3>Cronologia</h3>{(store.get('hist', []) as string[]).map(h => <div key={h}><a onClick={() => { setQ(h); run(h) }}>{h}</a></div>)}
   </section>
 }
 
@@ -145,7 +185,7 @@ function PwaInfo() {
 }
 function Profilo({angle, setAngle, theme, setTheme}: any) {
   const exp = () => { const d: any = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i)!; d[k] = localStorage.getItem(k) }
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(d)], {type: 'application/json'})); a.download = 'toolbox-backup.json'; a.click() }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(d)], {type: 'application/json'})); a.download = 'acciobox-backup.json'; a.click() }
   const imp = (f: File) => f.text().then(t => { Object.entries(JSON.parse(t)).forEach(([k, v]) => localStorage.setItem(k, v as string)); location.reload() })
   return <section><h2>Profilo</h2><label>Tema <select value={theme} onChange={e => setTheme(e.target.value)}><option value="dark">Scuro</option><option value="light">Chiaro</option></select></label>
     <label>Angoli <select value={angle} onChange={e => setAngle(e.target.value)}><option value="rad">RAD</option><option value="deg">DEG</option></select></label>
@@ -153,16 +193,26 @@ function Profilo({angle, setAngle, theme, setTheme}: any) {
     <PwaInfo /><DashCfg /><button onClick={() => { localStorage.removeItem('hist'); location.reload() }}>Elimina cronologia</button></section>
 }
 
+const ICON: Record<string, any> = {
+  Home: <path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" />,
+  Toolbox: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+  Formulario: <><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z" /><path d="M9 8h6M9 12h4" /></>,
+  Database: <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></>,
+  Profilo: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" /></>}
+const Ic = ({n}: {n: string}) => <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{ICON[n]}</svg>
 function App() {
   const [tab, setTab] = useState('Home'), [sub, setSub] = useState('Risolutore')
   const [angle, setAngle] = useState<Angle>(store.get('angle', 'rad')), [theme, setTheme] = useState<string>(store.get('theme', 'dark'))
   useEffect(() => { document.documentElement.dataset.theme = theme; store.set('theme', theme); store.set('angle', angle) }, [theme, angle])
   const tools: Record<string, any> = {Risolutore: <Risolutore angle={angle} />, Calcolatrice: <Calcolatrice angle={angle} />, Convertitore: <Convertitore />}
-  return <div className="app"><main>
-    {tab === 'Home' && <Home go={(t, x) => { setTab(t); if (x) setSub(x) }} />}
-    {tab === 'Toolbox' && <><div className="tabs">{Object.keys(tools).map(t => <button key={t} className={sub === t ? 'on' : ''} onClick={() => setSub(t)}>{t}</button>)}</div>{tools[sub]}</>}
-    {tab === 'Formulario' && <Formulario angle={angle} />}{tab === 'Database' && <Database />}
-    {tab === 'Profilo' && <Profilo angle={angle} setAngle={setAngle} theme={theme} setTheme={setTheme} />}</main>
-    <nav>{['Home', 'Toolbox', 'Formulario', 'Database', 'Profilo'].map(t => <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}</nav></div>
+  return <div className="app">
+    <header className="top"><svg viewBox="0 0 64 64" width="28" height="28"><rect width="64" height="64" rx="14" fill="var(--acc)" /><path d="M10 40C20 14 28 14 32 32S44 50 54 24" fill="none" stroke="#14161a" strokeWidth="6" strokeLinecap="round" /></svg><b>AccioBox</b><span className="muted">{tab}</span>
+      <button className="chip" onClick={() => setAngle(angle === 'rad' ? 'deg' : 'rad')}>{angle.toUpperCase()}</button></header>
+    <main>
+      {tab === 'Home' && <Home go={(t, x) => { setTab(t); if (x) setSub(x) }} />}
+      {tab === 'Toolbox' && <><div className="seg">{Object.keys(tools).map(t => <button key={t} className={sub === t ? 'on' : ''} onClick={() => setSub(t)}>{t}</button>)}</div>{tools[sub]}</>}
+      {tab === 'Formulario' && <Formulario angle={angle} />}{tab === 'Database' && <Database />}
+      {tab === 'Profilo' && <Profilo angle={angle} setAngle={setAngle} theme={theme} setTheme={setTheme} />}</main>
+    <nav>{['Home', 'Toolbox', 'Formulario', 'Database', 'Profilo'].map(t => <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}><Ic n={t} /><span>{t}</span></button>)}</nav></div>
 }
 createRoot(document.getElementById('root')!).render(<Boundary><App /></Boundary>)
