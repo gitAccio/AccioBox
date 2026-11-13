@@ -1,0 +1,18 @@
+:root{--bg:#14161a;--fg:#d9dde3;--card:#1d2026;--line:#2e333b;--acc:#e8a33d;--mut:#8a919c}
+[data-theme=light]{--bg:#f3f4f6;--fg:#1b1e23;--card:#fff;--line:#d3d7dd;--acc:#b86e00;--mut:#5f6673}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px 16px 80px}h2,h3{font-weight:600;letter-spacing:.02em}
+input,select,button{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:8px 10px;font:inherit}input{width:100%}
+button{cursor:pointer}button.on{border-color:var(--acc);color:var(--acc)}.row{display:flex;gap:8px;align-items:center;margin:6px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px;margin:8px 0}
+.mono,code{font-family:ui-monospace,Menlo,monospace}.muted{color:var(--mut);font-size:13px}.err{color:#e5534b}
+.badge{border:1px solid var(--line);border-radius:10px;padding:1px 8px;font-size:11px;color:var(--mut)}.badge.verificato{color:#4caf7d}.badge.da_verificare{color:var(--acc)}
+.tabs{display:flex;gap:6px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.plot{width:100%;background:var(--bg);border:1px solid var(--line);touch-action:none;margin-top:8px}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line)}nav button{flex:1;border:0;border-radius:0;padding:14px 0}
+a{color:var(--acc);cursor:pointer}.tex{font-size:1.25em;margin:8px 0}label{display:block;margin:8px 0}
+.keys{display:grid;gap:6px;margin:8px 0}.k5{grid-template-columns:repeat(5,1fr)}.k4{grid-template-columns:repeat(4,1fr)}
+.key{padding:16px 0;font-size:17px;border-radius:8px}.key.num{background:var(--bg)}.key.eq{background:var(--acc);color:#111;border-color:var(--acc)}
+.display input{border:0;background:transparent;font-size:26px;text-align:right;padding:4px}.preview{text-align:right;font-size:20px;color:var(--acc);min-height:28px}
+.display .muted{text-align:right;min-height:18px}.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.chip{padding:8px 12px;border-radius:14px}
+select{width:100%}
+.note{width:100%;min-height:60px;margin-top:8px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:8px;font:inherit}
