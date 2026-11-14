@@ -15,6 +15,9 @@ test('l\'app si avvia e tutte le schermate si aprono', async () => {
   for (const t of ['Calcolatrice', 'Convertitore', 'Risolutore']) { click(t); await tick(); expect(document.querySelector('.card.err'), t).toBeNull() }
   click('Risolutore'); await tick(); click('Risolvi'); await tick(); expect(document.body.textContent).toContain('simbolico')
   click('f(x)=x^3-3*x'); await tick(); expect(document.body.textContent).toContain('Studio di funzione')
+  for (const [tab, txt] of [['Grafici', 'Traccia'], ['Calcolatori', 'σ1'], ['Statistica', 'Media']]) { click(tab); await tick(); expect(document.querySelector('.card.err'), tab).toBeNull(); expect(document.body.textContent).toContain(txt) }
+  click('Statistica'); await tick(); click('Regressione'); await tick(); expect(document.body.textContent).toContain('R²')
+  click('Grafici'); await tick(); click('Traccia'); await tick()
   click('Calcolatrice'); await tick(); for (const k of ['7', '+', '8', '=']) { click(k); await tick() }
   expect((document.querySelector('.display input') as HTMLInputElement).value).toBe('15')
   click('+'); await tick(); click('2'); await tick(); click('='); await tick()

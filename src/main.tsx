@@ -8,6 +8,8 @@ import {solve, fmt, evaluate, roots, analyzeUnits, convert, Angle, Study} from '
 import './style.css'
 import {registerSW} from 'virtual:pwa-register'
 import {Calcolatrice, Convertitore, useCaret} from './keypad'
+import {Plot} from './plot'
+import {Grafici, Calcolatori, Statistica} from './tools'
 
 type Formula = {id: string; nome: string; latex: string; expr: string; stato: string; fonte: string; ipotesi?: string; variabili: Record<string, string>; materia: string}
 const files = import.meta.glob('/content/formulario/**/formule.yaml', {query: '?raw', import: 'default', eager: true}) as Record<string, string>
@@ -17,62 +19,6 @@ const FORMULE: Formula[] = Object.entries(files).flatMap(([p, raw]) => {
 })
 const Tex = ({t}: {t: string}) => <span dangerouslySetInnerHTML={{__html: katex.renderToString(t, {throwOnError: false})}} />
 const store = {get: (k: string, d: any) => { try { return JSON.parse(localStorage.getItem(k) ?? '') } catch { return d } }, set: (k: string, v: any) => localStorage.setItem(k, JSON.stringify(v))}
-
-type View = {x0: number; x1: number; y0: number; y1: number}
-const nice = (span: number, n = 6) => { const raw = span / n, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p }
-const tfmt = (t: number) => String(Number(t.toPrecision(6)))
-function fitView(st: Study): View {
-  const xs = [...st.zeros, ...st.crit.map(c => c.x), ...st.infl]
-  const x0 = Math.max(-100, Math.min(-5, ...xs.map(x => x - 1))), x1 = Math.min(100, Math.max(5, ...xs.map(x => x + 1)))
-  const ys: number[] = []; for (let i = 0; i <= 400; i++) { const y = st.fn(x0 + (x1 - x0) * i / 400); if (isFinite(y)) ys.push(y) }
-  ys.sort((a, b) => a - b); let y0 = ys.length ? ys[Math.floor(ys.length * 0.02)] : -5, y1 = ys.length ? ys[Math.floor(ys.length * 0.98)] : 5
-  const pad = (y1 - y0) * 0.15 || 1; return {x0, x1, y0: y0 - pad, y1: y1 + pad}
-}
-const zoomAt = (vw: View, ax: number, ay: number, k: number): View => {
-  const sx = (vw.x1 - vw.x0) * k, sy = (vw.y1 - vw.y0) * k; if (sx < 1e-6 || sx > 1e7 || sy < 1e-6 || sy > 1e7) return vw
-  const fx = (ax - vw.x0) / (vw.x1 - vw.x0), fy = (ay - vw.y0) / (vw.y1 - vw.y0)
-  return {x0: ax - fx * sx, x1: ax - fx * sx + sx, y0: ay - fy * sy, y1: ay - fy * sy + sy}
-}
-function Plot({st}: {st: Study}) {
-  const ref = useRef<HTMLCanvasElement>(null)
-  const [v, setV] = useState<View>(() => fitView(st)), vr = useRef(v); vr.current = v
-  const [cur, setCur] = useState<{x: number; y: number} | null>(null)
-  const ptrs = useRef(new Map<number, {x: number; y: number}>()), lastD = useRef(0)
-  useEffect(() => { setV(fitView(st)) }, [st])
-  const toData = (cx: number, cy: number, vw: View) => { const r = ref.current!.getBoundingClientRect(); return {x: vw.x0 + (cx - r.left) / r.width * (vw.x1 - vw.x0), y: vw.y1 - (cy - r.top) / r.height * (vw.y1 - vw.y0)} }
-  useEffect(() => { const c = ref.current!; const h = (e: WheelEvent) => { e.preventDefault(); const p = toData(e.clientX, e.clientY, vr.current); setV(zoomAt(vr.current, p.x, p.y, Math.exp(e.deltaY * 0.0015))) }
-    c.addEventListener('wheel', h, {passive: false}); return () => c.removeEventListener('wheel', h) }, [])
-  useEffect(() => {
-    const c = ref.current!, g = c.getContext('2d')!, W = c.width, H = c.height, cs = getComputedStyle(c), col = (n: string) => cs.getPropertyValue(n).trim()
-    const X = (x: number) => (x - v.x0) / (v.x1 - v.x0) * W, Y = (y: number) => H - (y - v.y0) / (v.y1 - v.y0) * H, cl = (a: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, a))
-    g.fillStyle = col('--card'); g.fillRect(0, 0, W, H); g.font = '13px system-ui, sans-serif'
-    const sx = nice(v.x1 - v.x0), sy = nice(v.y1 - v.y0), axY = cl(Y(0), 16, H - 6), axX = cl(X(0), 6, W - 44)
-    g.lineWidth = 1
-    for (let k = Math.ceil(v.x0 / sx); k <= Math.floor(v.x1 / sx) && k - Math.ceil(v.x0 / sx) < 60; k++) { const px = X(k * sx); g.strokeStyle = col('--line'); g.beginPath(); g.moveTo(px, 0); g.lineTo(px, H); g.stroke(); if (k !== 0) { g.fillStyle = col('--mut'); g.fillText(tfmt(k * sx), px + 3, axY - 5 > 14 ? Math.min(axY + 15, H - 4) : 14) } }
-    for (let k = Math.ceil(v.y0 / sy); k <= Math.floor(v.y1 / sy) && k - Math.ceil(v.y0 / sy) < 60; k++) { const py = Y(k * sy); g.strokeStyle = col('--line'); g.beginPath(); g.moveTo(0, py); g.lineTo(W, py); g.stroke(); if (k !== 0) { g.fillStyle = col('--mut'); g.fillText(tfmt(k * sy), axX + 5, py - 3) } }
-    g.strokeStyle = col('--mut'); g.lineWidth = 1.5; g.beginPath(); g.moveTo(0, axY); g.lineTo(W, axY); g.moveTo(axX, 0); g.lineTo(axX, H); g.stroke()
-    g.fillStyle = col('--fg'); g.fillText(st.v, W - 16, axY - 6 < 12 ? axY + 16 : axY - 6); g.fillText(st.name + '(' + st.v + ')', axX + 8 > W - 90 ? axX - 90 : axX + 8, 14)
-    g.strokeStyle = col('--acc'); g.lineWidth = 2.5; g.lineJoin = 'round'; g.beginPath(); let prev: number | null = null
-    for (let i = 0; i <= W; i++) { const y = st.fn(v.x0 + (v.x1 - v.x0) * i / W)
-      if (!isFinite(y) || Math.abs(Y(y)) > 1e5) { prev = null; continue }
-      const py = Y(y); if (prev === null || Math.abs(py - prev) > H * 3) g.moveTo(i, py); else g.lineTo(i, py); prev = py }
-    g.stroke()
-    const dot = (x: number, y: number, c: string) => { if (!isFinite(y)) return; g.fillStyle = c; g.beginPath(); g.arc(X(x), Y(y), 5, 0, 7); g.fill(); g.strokeStyle = col('--card'); g.lineWidth = 2; g.stroke() }
-    st.zeros.slice(0, 40).forEach(x => dot(x, 0, col('--blue'))); st.crit.forEach(p => dot(p.x, p.y, col('--acc')))
-  }, [st, v])
-  const rect = () => ref.current!.getBoundingClientRect()
-  const center = (k: number) => setV(zoomAt(v, (v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2, k))
-  return <div><canvas ref={ref} width={800} height={480} className="plot"
-    onPointerDown={e => { ptrs.current.set(e.pointerId, {x: e.clientX, y: e.clientY}); (e.target as Element).setPointerCapture(e.pointerId); if (ptrs.current.size === 2) { const [a, b] = [...ptrs.current.values()]; lastD.current = Math.hypot(a.x - b.x, a.y - b.y) } }}
-    onPointerMove={e => { const p = toData(e.clientX, e.clientY, vr.current); setCur({x: p.x, y: st.fn(p.x)})
-      const prev = ptrs.current.get(e.pointerId); if (!prev) return; ptrs.current.set(e.pointerId, {x: e.clientX, y: e.clientY}); const r = rect()
-      if (ptrs.current.size === 1) { const dx = (e.clientX - prev.x) / r.width * (vr.current.x1 - vr.current.x0), dy = (e.clientY - prev.y) / r.height * (vr.current.y1 - vr.current.y0); const w = vr.current; setV({x0: w.x0 - dx, x1: w.x1 - dx, y0: w.y0 + dy, y1: w.y1 + dy}) }
-      else if (ptrs.current.size === 2) { const [a, b] = [...ptrs.current.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (lastD.current > 0 && d > 0) { const m = toData((a.x + b.x) / 2, (a.y + b.y) / 2, vr.current); setV(zoomAt(vr.current, m.x, m.y, lastD.current / d)) } lastD.current = d } }}
-    onPointerUp={e => { ptrs.current.delete(e.pointerId); lastD.current = 0 }} onPointerCancel={e => { ptrs.current.delete(e.pointerId); lastD.current = 0 }} onPointerLeave={() => setCur(null)} />
-    <div className="row"><button onClick={() => center(0.7)}>＋</button><button onClick={() => center(1 / 0.7)}>－</button><button onClick={() => setV(fitView(st))}>⤢ Adatta vista</button>
-      <span className="mono muted" style={{marginLeft: 'auto'}}>{cur ? `${st.v}=${tfmt(cur.x)}  ${st.name}=${isFinite(cur.y) ? tfmt(cur.y) : '—'}` : 'trascina · pizzica/rotella per zoom'}</span></div>
-    <p className="muted"><span className="dot blue" /> zeri · <span className="dot amber" /> estremi</p></div>
-}
 
 const EX = ['a*x+b=0', 'x^2+b*x+c=0', 'f(x)=x^3-3*x', 'y=sin(x)', 'a=2; f(x)=a*x^2', 'sin(pi/4)^2+3!', '5 km/h to m/s']
 const SYM = ['^', '(', ')', 'pi', 'sqrt(', '=', ';', 'f(x)=']
@@ -133,7 +79,7 @@ function Formulario({angle}: {angle: Angle}) {
 const DASH0 = ['search', 'tools', 'recenti', 'preferiti', 'materie']
 const DLBL: Record<string, string> = {search: 'Ricerca universale', tools: 'Strumenti rapidi', recenti: 'Ultimi calcoli', preferiti: 'Formule preferite', materie: 'Materie'}
 const dash = () => store.get('dash', {order: DASH0, hidden: []}) as {order: string[]; hidden: string[]}
-const TOOLS = ['Risolutore', 'Calcolatrice', 'Convertitore']
+const TOOLS = ['Risolutore', 'Calcolatrice', 'Convertitore', 'Grafici', 'Calcolatori', 'Statistica']
 function Home({go}: {go: (t: string, s?: string) => void}) {
   const [q, setQ] = useState(''); const d = dash(); const ql = q.toLowerCase()
   const res = ql.length < 2 ? [] : [
@@ -204,9 +150,9 @@ function App() {
   const [tab, setTab] = useState('Home'), [sub, setSub] = useState('Risolutore')
   const [angle, setAngle] = useState<Angle>(store.get('angle', 'rad')), [theme, setTheme] = useState<string>(store.get('theme', 'dark'))
   useEffect(() => { document.documentElement.dataset.theme = theme; store.set('theme', theme); store.set('angle', angle) }, [theme, angle])
-  const tools: Record<string, any> = {Risolutore: <Risolutore angle={angle} />, Calcolatrice: <Calcolatrice angle={angle} />, Convertitore: <Convertitore />}
+  const tools: Record<string, any> = {Risolutore: <Risolutore angle={angle} />, Calcolatrice: <Calcolatrice angle={angle} />, Convertitore: <Convertitore />, Grafici: <Grafici angle={angle} />, Calcolatori: <Calcolatori />, Statistica: <Statistica />}
   return <div className="app">
-    <header className="top"><svg viewBox="0 0 64 64" width="28" height="28"><rect width="64" height="64" rx="14" fill="var(--acc)" /><path d="M10 40C20 14 28 14 32 32S44 50 54 24" fill="none" stroke="#14161a" strokeWidth="6" strokeLinecap="round" /></svg><b>AccioBox</b><span className="muted">{tab}</span>
+    <header className="top"><svg viewBox="0 0 64 64" width="28" height="28"><rect width="64" height="64" rx="8" fill="var(--acc)" /><path d="M10 40C20 14 28 14 32 32S44 50 54 24" fill="none" stroke="#14161a" strokeWidth="6" strokeLinecap="round" /></svg><b>AccioBox</b><span className="muted">{tab}</span>
       <button className="chip" onClick={() => setAngle(angle === 'rad' ? 'deg' : 'rad')}>{angle.toUpperCase()}</button></header>
     <main>
       {tab === 'Home' && <Home go={(t, x) => { setTab(t); if (x) setSub(x) }} />}
