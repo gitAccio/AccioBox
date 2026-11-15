@@ -55,7 +55,7 @@ function Scheda({f, angle}: {f: Formula; angle: Angle}) {
     <button onClick={calc}>Calcola</button><div className="mono">{res}</div></>}<textarea className="note" placeholder="Appunti" value={note} onChange={e => { setNote(e.target.value); store.set('note:' + f.id, e.target.value) }} /></div>
 }
 
-const MATS = Object.entries(import.meta.glob('/content/formulario/**/_materia.yaml', {query: '?raw', import: 'default', eager: true}) as Record<string, string>).map(([p, r]) => { const x = p.split('/'); return {key: x[x.length - 2], area: x[x.length - 3], nome: (yaml.load(r) as any).nome as string} })
+const MATS = Object.entries(import.meta.glob('/content/formulario/**/_materia.yaml', {query: '?raw', import: 'default', eager: true}) as Record<string, string>).map(([p, r]) => { const x = p.split('/'); return {key: x[x.length - 2], area: x[x.length - 3], nome: (yaml.load(r) as any).nome as string, ordine: ((yaml.load(r) as any).ordine ?? 999) as number} }).sort((a, b) => a.ordine - b.ordine)
 const pretty = (s: string) => s.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase())
 const cnt = (m: string) => FORMULE.filter(f => f.materia === m).length
 function Formulario({angle}: {angle: Angle}) {
