@@ -11,7 +11,7 @@ import {Calcolatrice, Convertitore, useCaret} from './keypad'
 import {Plot} from './plot'
 import {Grafici, Calcolatori, Statistica} from './tools'
 
-type Formula = {id: string; nome: string; latex: string; expr: string; stato: string; fonte: string; ipotesi?: string; variabili: Record<string, string>; materia: string}
+type Formula = {id: string; nome: string; latex: string; expr?: string; stato: string; fonte: string; ipotesi?: string; variabili?: Record<string, string>; materia: string}
 const files = import.meta.glob('/content/formulario/**/formule.yaml', {query: '?raw', import: 'default', eager: true}) as Record<string, string>
 const FORMULE: Formula[] = Object.entries(files).flatMap(([p, raw]) => {
   const materia = p.split('/').slice(-2, -1)[0]
@@ -40,9 +40,9 @@ function Risolutore({angle}: {angle: Angle}) {
 }
 
 function Scheda({f, angle}: {f: Formula; angle: Angle}) {
-  const vars = Object.keys(f.variabili); const [vals, setVals] = useState<Record<string, string>>({}); const [target, setTarget] = useState(vars[0]); const [res, setRes] = useState(''); const [note, setNote] = useState<string>(store.get('note:' + f.id, ''))
+  const vars = Object.keys(f.variabili ?? {}); const [vals, setVals] = useState<Record<string, string>>({}); const [target, setTarget] = useState(vars[0]); const [res, setRes] = useState(''); const [note, setNote] = useState<string>(store.get('note:' + f.id, ''))
   const calc = () => { try {
-    const [l, r] = f.expr.split('='); const known: any = {}; vars.filter(x => x !== target).forEach(x => known[x] = Number(vals[x]))
+    const [l, r] = f.expr!.split('='); const known: any = {}; vars.filter(x => x !== target).forEach(x => known[x] = Number(vals[x]))
     if (vars.some(x => x !== target && !isFinite(known[x]))) throw new Error('Compila tutte le altre variabili')
     if (l.trim() === target) return setRes(`${target} = ${fmt(evaluate(r, angle, known))}  [valutazione diretta]`)
     const F = (x: number) => Number(evaluate(`(${l})-(${r})`, angle, {...known, [target]: x}))
@@ -50,9 +50,9 @@ function Scheda({f, angle}: {f: Formula; angle: Angle}) {
   } catch (e: any) { setRes('Errore: ' + e.message) } }
   return <div><span className={'badge ' + f.stato}>{f.stato}</span>
     <div className="tex"><Tex t={f.latex} /></div>{f.ipotesi && <p className="muted">Ipotesi: {f.ipotesi}</p>}<p className="muted">Fonte: {f.fonte}</p>
-    <label>Calcola <select value={target} onChange={e => setTarget(e.target.value)}>{vars.map(v => <option key={v}>{v}</option>)}</select></label>
-    {vars.filter(v => v !== target).map(v => <div className="row" key={v}><span style={{width: 70}}>{v}</span><input inputMode="decimal" value={vals[v] ?? ''} onChange={e => setVals({...vals, [v]: e.target.value})} placeholder={f.variabili[v]} /></div>)}
-    <button onClick={calc}>Calcola</button><div className="mono">{res}</div><textarea className="note" placeholder="Appunti" value={note} onChange={e => { setNote(e.target.value); store.set('note:' + f.id, e.target.value) }} /></div>
+    {f.expr && <><label>Calcola <select value={target} onChange={e => setTarget(e.target.value)}>{vars.map(v => <option key={v}>{v}</option>)}</select></label>
+    {vars.filter(v => v !== target).map(v => <div className="row" key={v}><span style={{width: 70}}>{v}</span><input inputMode="decimal" value={vals[v] ?? ''} onChange={e => setVals({...vals, [v]: e.target.value})} placeholder={(f.variabili ?? {})[v]} /></div>)}
+    <button onClick={calc}>Calcola</button><div className="mono">{res}</div></>}<textarea className="note" placeholder="Appunti" value={note} onChange={e => { setNote(e.target.value); store.set('note:' + f.id, e.target.value) }} /></div>
 }
 
 const MATS = Object.entries(import.meta.glob('/content/formulario/**/_materia.yaml', {query: '?raw', import: 'default', eager: true}) as Record<string, string>).map(([p, r]) => { const x = p.split('/'); return {key: x[x.length - 2], area: x[x.length - 3], nome: (yaml.load(r) as any).nome as string} })
@@ -63,7 +63,7 @@ function Formulario({angle}: {angle: Angle}) {
   const [area, setArea] = useState('Tutte'), [mat, setMat] = useState('Tutte'), [open, setOpen] = useState<string | null>(null), [onlyFav, setOnlyFav] = useState(false)
   const areas = [...new Set(MATS.map(m => m.area))]
   const mats = MATS.filter(m => area === 'Tutte' || m.area === area)
-  const list = useMemo(() => FORMULE.filter(f => (area === 'Tutte' || MATS.find(m => m.key === f.materia)?.area === area) && (mat === 'Tutte' || f.materia === mat) && (!onlyFav || fav.includes(f.id)) && (f.nome + ' ' + f.latex + ' ' + Object.keys(f.variabili).join(' ')).toLowerCase().includes(q.toLowerCase())), [q, area, mat, onlyFav, fav])
+  const list = useMemo(() => FORMULE.filter(f => (area === 'Tutte' || MATS.find(m => m.key === f.materia)?.area === area) && (mat === 'Tutte' || f.materia === mat) && (!onlyFav || fav.includes(f.id)) && (f.nome + ' ' + f.latex + ' ' + Object.keys(f.variabili ?? {}).join(' ')).toLowerCase().includes(q.toLowerCase())), [q, area, mat, onlyFav, fav])
   return <section><h2>Formulario</h2>
     <div className="row"><label style={{flex: 1}}>Area <select value={area} onChange={e => { setArea(e.target.value); setMat('Tutte') }}><option>Tutte</option>{areas.map(a => <option key={a} value={a}>{pretty(a)}</option>)}</select></label>
       <label style={{flex: 1}}>Materia <select value={mat} onChange={e => setMat(e.target.value)}><option>Tutte</option>{mats.map(m => <option key={m.key} value={m.key}>{m.nome} ({cnt(m.key)})</option>)}</select></label></div>
@@ -83,7 +83,7 @@ const TOOLS = ['Risolutore', 'Calcolatrice', 'Convertitore', 'Grafici', 'Calcola
 function Home({go}: {go: (t: string, s?: string) => void}) {
   const [q, setQ] = useState(''); const d = dash(); const ql = q.toLowerCase()
   const res = ql.length < 2 ? [] : [
-    ...FORMULE.filter(f => (f.nome + ' ' + f.latex + ' ' + Object.keys(f.variabili).join(' ')).toLowerCase().includes(ql)).slice(0, 8).map(f => ({t: 'Formula', n: f.nome, a: () => { store.set('prefill', f.nome); go('Formulario') }})),
+    ...FORMULE.filter(f => (f.nome + ' ' + f.latex + ' ' + Object.keys(f.variabili ?? {}).join(' ')).toLowerCase().includes(ql)).slice(0, 8).map(f => ({t: 'Formula', n: f.nome, a: () => { store.set('prefill', f.nome); go('Formulario') }})),
     ...MATS.filter(m => m.nome.toLowerCase().includes(ql)).map(m => ({t: 'Materia', n: m.nome, a: () => go('Formulario')})),
     ...COST.filter(c => c[0].toLowerCase().includes(ql)).map(c => ({t: 'Costante', n: c[0] + ' = ' + c[1], a: () => go('Database')})),
     ...MATERIALI.filter(m => (m.nome + m.categoria).toLowerCase().includes(ql)).map(m => ({t: 'Materiale', n: m.nome, a: () => go('Database')})),
